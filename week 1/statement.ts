@@ -1,27 +1,11 @@
-type PlayMeta = { name: string; type: string };
-export type PlayID = "hamlet" | "as-like" | "othello";
-export type Performance = { playID: PlayID; audience: number };
-
-type EnrichedPerformance = Performance & {
-  play: PlayMeta;
-  amount: number;
-  volumeCredits: number;
-};
-
-type StatementData = {
-  customer: string;
-  performances: EnrichedPerformance[];
-  totalAmount: number;
-  totalVolumeCredits: number;
-};
-export interface Plays {
-  [key: string]: PlayMeta;
-}
-
-export interface Invoice {
-  performances: Performance[];
-  customer: string;
-}
+import { createPerformanceCalculator } from "./calculator";
+import type {
+  EnrichedPerformance,
+  Invoice,
+  Performance,
+  Plays,
+  StatementData,
+} from "./types";
 
 const plays: Plays = {
   hamlet: { name: "Hamlet", type: "tragedy" },
@@ -45,7 +29,7 @@ export function htmlStatement(invoice: Invoice, plays: Plays) {
   return renderHtml(createStatementData(invoice, plays));
 }
 
-export function renderHtml(data: StatementData): string {
+function renderHtml(data: StatementData): string {
   let result = `<h1>청구 내역 (고객명: ${data.customer})</h1>\n`;
   result += `<table>\n`;
   result += `<tr><th>연극</th><th>좌석 수</th><th>금액</th></tr>\n`;
@@ -61,7 +45,7 @@ export function renderHtml(data: StatementData): string {
   return result;
 }
 
-export function createStatementData(invoice: Invoice, plays: Plays) {
+function createStatementData(invoice: Invoice, plays: Plays) {
   const result: StatementData = {
     customer: invoice.customer,
     performances: invoice.performances.map(enrichPerformance),
@@ -75,15 +59,19 @@ export function createStatementData(invoice: Invoice, plays: Plays) {
   return result;
 
   function enrichPerformance(aPerformance: Performance): EnrichedPerformance {
+    const calculator = createPerformanceCalculator(
+      aPerformance,
+      playFor(aPerformance),
+    );
     return {
       ...aPerformance,
-      play: playFor(aPerformance, plays),
-      amount: amountFor(aPerformance),
-      volumeCredits: volumeCreditsFor(aPerformance, plays),
+      play: calculator.play,
+      amount: calculator.amount,
+      volumeCredits: calculator.volumeCredits,
     };
   }
 
-  function playFor(aPerfomance: Performance, plays: Plays) {
+  function playFor(aPerfomance: Performance) {
     return plays[aPerfomance.playID];
   }
 
@@ -94,46 +82,9 @@ export function createStatementData(invoice: Invoice, plays: Plays) {
   function totalVolumeCredits(data: StatementData) {
     return data.performances.reduce((total, p) => total + p.volumeCredits, 0);
   }
-
-  function volumeCreditsFor(perf: Performance, plays: Plays) {
-    let result = 0;
-
-    result += Math.max(perf.audience - 30, 0);
-
-    if ("comedy" === playFor(perf, plays).type)
-      result += Math.floor(perf.audience / 5);
-
-    return result;
-  }
-
-  function amountFor(aPreformance: Performance) {
-    let result = 0;
-    const play = playFor(aPreformance, plays);
-
-    switch (play.type) {
-      case "tragedy":
-        result = 40000;
-        if (aPreformance.audience > 30) {
-          result += 1000 * (aPreformance.audience - 30);
-        }
-        break;
-
-      case "comedy":
-        result = 30000;
-        if (aPreformance.audience > 20) {
-          result += 10000 + 5000 * (aPreformance.audience - 20);
-        }
-        result += 300 * aPreformance.audience;
-        break;
-      default:
-        throw new Error(`알 수 없는 장르: ${play.type}`);
-    }
-
-    return result;
-  }
 }
 
-export function renderPlainText(data: StatementData) {
+function renderPlainText(data: StatementData) {
   let result = `청구내역 (고객명: ${data.customer})\n`;
 
   for (const perf of data.performances) {
@@ -146,7 +97,7 @@ export function renderPlainText(data: StatementData) {
   return result;
 }
 
-export function usd(aNumber: number) {
+function usd(aNumber: number) {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
