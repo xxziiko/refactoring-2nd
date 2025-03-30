@@ -23,7 +23,12 @@ export interface Invoice {
   customer: string;
 }
 
-export function statement(invoice: Invoice) {
+export function statement(invoice: Invoice, plays: Plays) {
+  const statementData = createStatementData(invoice);
+  return renderPlainText(statementData, plays);
+}
+
+export function createStatementData(invoice: Invoice) {
   const statementData: StatementData = {
     customer: invoice.customer,
     performances: invoice.performances.map(enrichPerformance),
@@ -34,7 +39,7 @@ export function statement(invoice: Invoice) {
   statementData.totalAmount = totalAmount(statementData);
   statementData.totalVolumeCredits = totalVolumeCredits(statementData);
 
-  return renderPlainText(statementData);
+  return statementData;
 }
 
 // object.assign 말고 스프레드 연산자 사용한 이유
@@ -43,17 +48,19 @@ export function enrichPerformance(
 ): EnrichedPerformance {
   return {
     ...aPerformance,
-    play: playFor(aPerformance),
+    play: playFor(aPerformance, plays),
     amount: amountFor(aPerformance),
-    volumeCredits: volumeCreditsFor(aPerformance),
+    volumeCredits: volumeCreditsFor(aPerformance, plays),
   };
 }
 
-export function renderPlainText(statementData: StatementData) {
+export function renderPlainText(statementData: StatementData, plays: Plays) {
   let result = `청구내역 (고객명: ${statementData.customer})\n`;
 
   for (const perf of statementData.performances) {
-    result += `${playFor(perf).name} : ${usd(amountFor(perf))} (${perf.audience}석)\n`;
+    const play = playFor(perf, plays);
+
+    result += `${play.name} : ${usd(amountFor(perf))} (${perf.audience}석)\n`;
   }
 
   result += `총액: ${usd(totalAmount(statementData))}\n`;
@@ -78,23 +85,24 @@ export function usd(aNumber: number) {
   }).format(aNumber / 100);
 }
 
-export function volumeCreditsFor(perf: Performance) {
+export function volumeCreditsFor(perf: Performance, plays: Plays) {
   let result = 0;
 
   result += Math.max(perf.audience - 30, 0);
 
-  if ("comedy" === playFor(perf).type) result += Math.floor(perf.audience / 5);
+  if ("comedy" === playFor(perf, plays).type)
+    result += Math.floor(perf.audience / 5);
 
   return result;
 }
 
-export function playFor(aPerfomance: Performance) {
+export function playFor(aPerfomance: Performance, plays: Plays) {
   return plays[aPerfomance.playID];
 }
 
 export function amountFor(aPreformance: Performance) {
   let result = 0;
-  const play = playFor(aPreformance);
+  const play = playFor(aPreformance, plays);
 
   switch (play.type) {
     case "tragedy":
@@ -132,4 +140,4 @@ const invoice: Invoice = {
   ],
 };
 
-console.log(statement(invoice));
+console.log(statement(invoice, plays));
