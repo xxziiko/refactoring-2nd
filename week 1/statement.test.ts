@@ -1,5 +1,5 @@
-// statement.test.ts
-import { type Invoice, type Plays, statement } from "./statement";
+import { statement } from "./statement";
+import type { Invoice, Plays } from "./types";
 
 describe("statement()", () => {
   it("고객 이름과 각 공연, 총액, 포인트를 포함한 청구서 문자열을 반환해야 함", () => {
