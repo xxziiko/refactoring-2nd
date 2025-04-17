@@ -1,0 +1,377 @@
+## 사이드 프로젝트에 리팩토링 적용
+
+
+### 1. 함수 추출하기 (Extract Function)
+
+#### 기존 코드
+```tsx
+const handleOrderSheet = () => {
+  const filteredCart = cartItems.filter(
+    (item) => checkedItems[item.cartItemId],
+  );
+  mutateCreateOrderSheet(mapCartItemsToCheckoutRequest(filteredCart));
+};
+
+const handleOrderSheetForSingleProduct = (cartItemId: string) => {
+  const filteredCart = cartItems.filter(
+    (item) => item.cartItemId === cartItemId,
+  );
+  mutateCreateOrderSheet(mapCartItemsToCheckoutRequest(filteredCart));
+};
+```
+
+- filter -> map -> mutate 의 로직이 두 함수에 중복
+- 의도를 파악하기 어렵다. 비슷하지만 무엇이 다른지 한 눈에 파악이 안된다.
+- 변경 시 수정 범위가 2곳 이상 -> 유지보수 어려움
+
+#### 리팩터링 적용
+
+```tsx
+// 매직 변수 제거
+const isCheckedItem = (item: CartItem) => !!checkedItems[item.cartItemId];
+
+
+// 공통 로직 추출
+const createOrderSheetFrom = (filterFn: (item: CartItem) => boolean) => {
+  const filteredCart = cartItems.filter(filterFn);
+  const payload = mapCartItemsToCheckoutRequest(filteredCart);
+  mutateCreateOrderSheet(payload);
+};
+
+
+const handleOrderSheet = () => {
+  createOrderSheetFrom(isCheckedItem);
+};
+
+const handleOrderSheetForSingleProduct = (cartItemId: string) => {
+  createOrderSheetFrom((item) => item.cartItemId === cartItemId);
+};
+```
+
+#### 적용한 리팩터링 기법
+- **함수 추출하기 (Extract Function)**
+  - 공통 흐름(filter → map → mutate)을 `createOrderSheetFrom()`으로 분리
+- **중복 코드 제거 (Remove Duplication)**
+- **의도를 드러내는 이름 사용 (Use Intention-Revealing Names)**
+- **매직 변수 제거(Replace Magic Literal)**
+  - `checkedItems[...]`와 같은 맥락 불분명한 표현을 분명한 이름으로 추상화
+
+
+#### 개선점
+  - 각 함수가 무엇을 하는지 명확하게 드러난다.
+  - 조건 함수(`isCheckedItem`)를 이름만으로 이해할 수 있다.
+  
+
+<br />
+
+### 2. 함수 인라인하기 (Inline Function)
+
+#### 기존코드
+
+```tsx
+const mapCartItemsToCheckoutRequest = (cartItems: CartList) => {
+  return cartItems.map((item) => ({
+    productId: item.productId,
+    size: item.selectedOption.size,
+    price: item.price,
+    quantity: item.quantity,
+    cartItemId: item.cartItemId,
+  }));
+};
+```
+
+- 이름이 본문보다 이해에 도움이 되는가? -> 의도 전달이 크지 않다.
+- 여러 곳에서 반복적으로 재사용되나? -> 앞선 리팩토링으로 재사용되지 않음
+- 변경 가능성이 있나? -> X
+
+
+#### 리팩터링 적용
+```tsx
+const createOrderSheetFrom = (filterFn: (item: CartItem) => boolean) => {
+  const filteredCart = cartItems.filter(filterFn);
+  const payload = filteredCart.map((item) => ({
+    productId: item.productId,
+    size: item.selectedOption.size,
+    price: item.price,
+    quantity: item.quantity,
+    cartItemId: item.cartItemId,
+  }));  
+  
+  mutateCreateOrderSheet(payload);
+};
+```
+- 단순한 매핑을 함수로 감싸는 오버헤드를 제거
+- `payload`가 어떤 구조인지 즉시 파악이 가능해져 코드의 추적이 용이해진다.
+
+
+<br />
+
+### 3. 변수 추출하기 (Extract Variable)
+
+#### 1. 조건식에서의 변수 추출하기
+```tsx
+ const handleQuantityChange = useCallback(
+    (id: string, quantity: number) => {
+      const initialStock =
+        productDetail.inventory.find((item) => item.size === id)?.stock ?? 0;
+
+      if (quantity >= 1 && quantity <= initialStock) {
+        setSelectedOptions((prev) =>
+          prev.map((option) =>
+            option.size === id ? { ...option, quantity } : option,
+          ),
+        );
+      }
+    },
+    [productDetail],
+  );
+```
+```tsx
+if (quantity >= 1 && quantity <= initialStock) {
+  /// ...
+}
+``` 
+- 조건식이 "무엇을 검사하는지" 명확하게 드러나지 않음
+- 의미가 코드로 추론되어야 한다.
+- 확장할 때 조건식이 길어질 수 있다.
+
+
+#### 리팩터링 적용
+```tsx
+const isValidQuantity = quantity >= 1 && quantity <= initialStock;
+
+if (isValidQuantity) {
+  /// ...
+},
+
+```
+- `isValidQuantity`라는 변수명만으로 조건의 의미를 직관적으로 설명
+- 향후 조건이 바뀌더라도 변수만 수정하면 된다.
+
+#### 2. 삼항 연산식 변수 추출하기
+```tsx
+  const tossPaymentsPayload = {
+    orderName:
+      orderSheetItems.length === 1
+        ? orderSheetItems[0].title
+        : `${orderSheetItems[0].title} 외 ${orderSheetItems.length - 1}건`,
+    amount: totalPriceWithDeliveryFee,
+  };
+```
+- 길고 조건이 복잡하다.
+- 가독성이 좋지 못하다.
+
+#### 리팩터링 적용
+```tsx
+const isSingleItem = orderSheetItems.length === 1;
+const orderName = isSingleItem
+  ? orderSheetItems[0].title
+  : `${orderSheetItems[0].title} 외 ${orderSheetItems.length - 1}건`;
+
+const restTossPaymentsPayload = {
+  orderName,
+  amount: totalPriceWithDeliveryFee,
+};
+```
+- 도메인 중심의 표현(`orderName`)으로 가독성을 높일 수 있다.
+
+<br />
+
+### 4. 변수 인라인하기 (Inline Variable)
+
+#### 기존코드
+```tsx
+  const itemPrices = orderSheetItems.map((item) => item.price * item.quantity);
+  const totalPrice = itemPrices.reduce((acc, price) => acc + price, 0);
+```
+- `itemPrices`는 한 번만 사용되고 가독성이나 의미 전달에 큰 기여를 하지 않는다.
+
+#### 리팩터링 적용
+```tsx
+const totalPrice = orderSheetItems
+  .map((item) => item.price * item.quantity)
+  .reduce((acc, price) => acc + price, 0);
+```
+- 계산식이 모여있어 코드의 흐름은 더 명확해진다.
+
+
+<br/>
+
+### 5. 함수 선언 바꾸기 (Change Function Declaration)
+
+#### 기존 코드
+```tsx
+const createOrderSheetFrom = (filterFn: (item: CartItem) => boolean) => {
+  const filtered = cartItems.filter(filterFn);
+  ...
+};
+```
+- 이름만으로 어떤걸 필터하는지 의도가 모호하다. **(“무엇”으로부터 생성되었는지 불분명)**
+- 호출자가 `filterFn`을 어떻게 작성해야 하는지 명확하지 않다.
+
+#### 리팩터링 적용
+```tsx
+const createOrderSheetWithFilter = (filter: (item: CartItem) => boolean) => {
+  const filtered = cartItems.filter(filter);
+  ...
+};
+```
+- `withFilter` 이라는 키워드로 **어떤 조건을 기준**으로 생성하는지 의도를 분명히 전달
+- 매개변수 이름도 기술적인 관점(`filterFn`) → 의미 중심(`filter`)으로 개선
+
+<br/>
+
+### 6. 변수 캡슐화하기 (Encapsulate Variable)
+#### 기존 코드
+
+```tsx
+// atoms.ts
+export const userAtom = atom<User | null>(null);
+export const userIdAtom = atom((get) => get(userAtom)?.id ?? '');
+export const isAuthenticatedAtom = atom((get) => get(userAtom) !== null);
+```
+```tsx
+export default function useHeader() {
+  const [user, setUser] = useAtom(userAtom);
+  
+  ///...
+}
+```
+- 컴포넌트마다 전역상태 atom에 직접 접근
+- 사용하는 곳마다 atom의 존재와 구조를 알아야 한다. (낮은 추상화 수준)
+- 의도 파악 어려움 → `useAtom(userAtom)`만 보고는 **“어떤 사용자 상태인지”** 알기 어려움
+
+#### 리팩터링 적용
+
+#### 커스텀 훅으로 캡슐화
+```tsx
+import type { User } from '@supabase/supabase-js';
+import { atom, useAtom } from 'jotai';
+
+const userAtom = atom<User | null>(null);
+const userIdAtom = atom((get) => get(userAtom)?.id ?? '');
+const isAuthenticatedAtom = atom((get) => get(userAtom) !== null);
+
+export default function useUser() {
+  const [user, setUser] = useAtom(userAtom);
+  const [userId, setUserId] = useAtom(userIdAtom);
+  const [isAuthenticated, setIsAuthenticated] = useAtom(isAuthenticatedAtom);
+
+  return { user, userId, isAuthenticated };
+}
+```
+
+```tsx
+export default function useHeader() {
+  const {user, setUser} = useUser();
+  
+  ///...
+}
+```
+- 사용자 도메인 상태를 하나의 커스텀 훅으로 모아 캡슐화
+- `serAtom`, `userIdAtom` 등의 구현 방식이 외부에 노출되지 않음 → 변경에 유연
+- 코드의 의도가 더 명확해짐: `useUser()`는 “사용자 정보를 다룬다”는 의미
+
+
+### 7. 변수 이름 바꾸기 (Rename Variable)
+
+#### 기존 코드
+```tsx
+const title = modalView === 'form' ? '주소 입력' : '주소 변경';
+```
+
+- `title`이라는 이름은 맥락이 광범위하다. 구체적으로 "무슨 제목인지" 알기 어렵다.
+
+#### 리팩터링 적용
+```tsx
+const addressModalTitle = modalView === 'form' ? '주소 입력' : '주소 변경';
+```
+
+
+<br/>
+
+### 8. 매개변수 객체 만들기 (Introduce Parameter Object)
+
+#### 기존 코드
+```tsx
+mutateOrderItems({
+  orderSheetId,
+  userAddressId: defaultAddress.addressId,
+  deliveryAddress: {
+    // ... 
+  },
+  termsAgreed: isAllCheckedAgreement,
+});
+```
+
+#### 리팩터링 적용
+```tsx
+const orderRequest = {
+  orderSheetId,
+  userAddressId: defaultAddress.addressId,
+  deliveryAddress: {
+    message: deliveryMessage,
+  },
+  termsAgreed: isAllCheckedAgreement,
+};
+
+mutateOrderItems(orderRequest);
+```
+- `mutateOrderItems()` 호출부가 명확하게 **“주문 요청”**을 의미
+
+
+<br/>
+
+### 9. 여러 함수를 변환 함수로 묶기 (Combine Functions into Transform)
+
+#### 기존 코드
+```tsx
+const totalPrice = orderSheetItems
+  .map((item) => item.price * item.quantity)
+  .reduce((acc, price) => acc + price, 0);
+
+const totalPriceWithDeliveryFee = totalPrice + 3000;
+
+const orderName = isSingleItem
+  ? orderSheetItems[0].title
+  : `${orderSheetItems[0].title} 외 ${orderSheetItems.length - 1}건`;
+```
+- 모두 `orderSheetItems`를 기반으로 한 파생 정보지만 서로 분리되어 개별 계산
+- 데이터 흐름이 한 눈에 안들어오고, 의미 단위가 잘 드러나지 않는다.
+- 다른 컴포넌트/훅에서 비슷한 계산이 중복될 위험이 있다.
+- 훅의 책임이 “계산 + 모달 상태 + 이벤트 처리”로 분산되어 있음 → 응집도 저하
+
+
+#### 리팩터링 적용
+```tsx
+const DELIVERY_FEE = 3000;
+ 
+export function getOrderSheetSummary(orderSheetItems: OrderSheetItem[]) {
+  const totalPrice = orderSheetItems.reduce(
+    (acc, item) => acc + item.price * item.quantity,
+    0,
+  );
+
+  const totalPriceWithDeliveryFee = totalPrice + DELIVERY_FEE;
+
+  const orderName =
+    orderSheetItems.length === 1
+      ? orderSheetItems[0].title
+      : `${orderSheetItems[0].title} 외 ${orderSheetItems.length - 1}건`;
+
+  return {
+    totalPrice,
+    totalPriceWithDeliveryFee,
+    orderName,
+  };
+}
+```
+
+```tsx
+const { totalPrice, totalPriceWithDeliveryFee, orderName } =
+  getOrderSheetSummary(orderSheetItems);
+```
+
+- 관련된 파생 계산들을 `getOrderSheetSummary(orderSheetItems)` 라는 하나의 변환 함수로 추출 -> 흐름이 명확해진다.
+- 훅 내부의 책임이 명확해지고, 불필요한 계산 분산이 제거됨
+- 의도 중심의 표현이 가능해져, 도메인 추상화 수준이 올라감
